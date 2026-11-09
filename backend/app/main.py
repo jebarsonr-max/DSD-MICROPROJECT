@@ -232,6 +232,7 @@ def root():
     }
 
 @app.get("/api/health")
+@app.get("/health")
 def health_check():
     return {"status": "ok", "service": "AeroSort AI API", "database": "SQLite Connected"}
 
