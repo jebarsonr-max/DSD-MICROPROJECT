@@ -52,3 +52,19 @@ ENV/
 
 # Database (optional - will be recreated automatically)
 # backend/aerosort.db
+
+# Dependencies
+node_modules/
+venv/
+
+# Database
+aerosort.db
+
+# Logs
+logs/
+
+# Editor
+.vscode/
+
+# OS
+.DS_Store
