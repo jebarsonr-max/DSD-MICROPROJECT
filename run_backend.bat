@@ -6,3 +6,4 @@ echo Swagger API Docs: http://localhost:8000/docs
 echo ================================================================
 python -m uvicorn backend.app.main:app --port 8000 --reload
 pause
+

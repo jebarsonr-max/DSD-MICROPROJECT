@@ -16,7 +16,17 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate }) => {
-  const { notifications, settings, resetDemoData, isBackendConnected } = useApp();
+  const {
+    notifications,
+    settings,
+    resetDemoData,
+    isBackendConnected,
+    connectionStatus,
+    apiBaseUrl,
+    apiLoading,
+    apiError,
+    retryBackendConnection,
+  } = useApp();
   const [currentTime, setCurrentTime] = useState<string>('');
   const [currentDate, setCurrentDate] = useState<string>('');
   const [isNotifOpen, setIsNotifOpen] = useState(false);
@@ -80,29 +90,76 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate }) => {
       </div>
 
       {/* Operational Controls & Status Bar */}
-      <div className="flex items-center gap-4">
-        {/* Backend REST API & DB Status Indicator */}
+      <div className="flex items-center gap-3">
+        {/* Backend REST API & DB Status Indicator (3 States: CONNECTED, CONNECTING, DISCONNECTED) */}
+        {connectionStatus === 'connected' && (
+          <div
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-bold border transition-colors bg-[#E8F7F0] text-[#16A36A] border-[#C2EBDA]"
+            title={`Backend connected at ${apiBaseUrl} — SQLite Active`}
+          >
+            <span className="w-2 h-2 rounded-full bg-[#16A36A] animate-pulse" />
+            <span>CONNECTED (FASTAPI)</span>
+          </div>
+        )}
+
+        {connectionStatus === 'connecting' && (
+          <div
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-bold border transition-colors bg-[#FEF6E9] text-[#E99A25] border-[#FCE2B6]"
+            title={`Connecting to backend at ${apiBaseUrl}...`}
+          >
+            <span className="w-2 h-2 rounded-full bg-[#E99A25] animate-ping" />
+            <span>CONNECTING API...</span>
+          </div>
+        )}
+
+        {connectionStatus === 'disconnected' && (
+          <div className="flex items-center gap-1.5">
+            <div
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-bold border transition-colors bg-[#FCEBEB] text-[#DC4545] border-[#F8C8C8]"
+              title={apiError || `Backend unavailable at ${apiBaseUrl}`}
+            >
+              <span className="w-2 h-2 rounded-full bg-[#DC4545]" />
+              <span>DISCONNECTED</span>
+            </div>
+            <button
+              onClick={() => retryBackendConnection()}
+              disabled={apiLoading}
+              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-mono font-bold rounded-full bg-white text-aviation-navy border border-aviation-border hover:bg-aviation-lightBlue hover:border-aviation-accent transition-colors shadow-subtle disabled:opacity-50"
+              title="Click to retry connecting to the backend"
+            >
+              <RotateCcw className={`w-3 h-3 text-aviation-accent ${apiLoading ? 'animate-spin' : ''}`} />
+              <span>Retry</span>
+            </button>
+          </div>
+        )}
+
+        {/* Airport Status Indicator — ONLY displays SYSTEM ACTIVE when backend connected */}
         <div
-          className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold border transition-colors ${
-            isBackendConnected
-              ? 'bg-[#E8F7F0] text-[#16A36A] border-[#C2EBDA]'
-              : 'bg-[#FEF6E9] text-[#E99A25] border-[#FCE2B6]'
+          className={`hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+            connectionStatus === 'connected'
+              ? 'bg-[#E8F7F0] border-[#C2EBDA] text-[#16A36A]'
+              : connectionStatus === 'connecting'
+              ? 'bg-[#FEF6E9] border-[#FCE2B6] text-[#E99A25]'
+              : 'bg-[#F1F5F9] border-aviation-border text-aviation-textSecondary'
           }`}
-          title={isBackendConnected ? "Connected to Python FastAPI & SQLite backend" : "FastAPI server connecting..."}
         >
           <span
             className={`w-2 h-2 rounded-full ${
-              isBackendConnected ? 'bg-[#16A36A] animate-pulse' : 'bg-[#E99A25]'
+              connectionStatus === 'connected'
+                ? 'bg-[#16A36A] animate-ping'
+                : connectionStatus === 'connecting'
+                ? 'bg-[#E99A25] animate-pulse'
+                : 'bg-[#94A3B8]'
             }`}
           />
-          <span>{isBackendConnected ? 'FASTAPI: SQLITE ACTIVE' : 'CONNECTING API...'}</span>
-        </div>
-
-        {/* Airport Status Indicator */}
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#E8F7F0] border border-[#C2EBDA] text-xs font-medium text-[#16A36A]">
-          <span className="w-2 h-2 rounded-full bg-[#16A36A] animate-ping" />
           <span className="font-semibold">{settings.airportCode} {settings.terminalName.split('—')[0].trim()}:</span>
-          <span>SYSTEM ACTIVE</span>
+          <span>
+            {connectionStatus === 'connected'
+              ? 'SYSTEM ACTIVE'
+              : connectionStatus === 'connecting'
+              ? 'CHECKING TELEMETRY...'
+              : 'OFFLINE MODE'}
+          </span>
         </div>
 
         {/* Live Date / Time Display */}

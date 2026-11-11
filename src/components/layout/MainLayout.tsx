@@ -16,7 +16,16 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
   children,
 }) => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const { luggage, conveyorState, startConveyorSimulation } = useApp();
+  const {
+    luggage,
+    conveyorState,
+    startConveyorSimulation,
+    connectionStatus,
+    apiBaseUrl,
+    apiError,
+    retryBackendConnection,
+    apiLoading,
+  } = useApp();
 
   const pendingBags = luggage.filter((b) => b.status === 'REGISTERED');
 
@@ -65,6 +74,25 @@ export const MainLayout: React.FC<MainLayoutProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Backend Disconnected Notice Banner */}
+        {connectionStatus === 'disconnected' && (
+          <div className="bg-[#FFF5F5] border-b border-[#F8C8C8] px-6 py-2.5 flex items-center justify-between text-xs text-[#9B1C1C] transition-all">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#DC4545]" />
+              <span>
+                <strong>Backend Disconnected:</strong> {apiError || `Cannot reach server at ${apiBaseUrl}. Showing local demonstration records.`}
+              </span>
+            </div>
+            <button
+              onClick={() => retryBackendConnection()}
+              disabled={apiLoading}
+              className="px-3 py-1 bg-white hover:bg-[#FEE2E2] text-[#DC4545] font-bold rounded border border-[#F8C8C8] transition-colors shadow-xs disabled:opacity-50"
+            >
+              {apiLoading ? 'Connecting...' : 'Retry Connection'}
+            </button>
+          </div>
+        )}
 
         {/* Dynamic Page Body */}
         <main className="flex-1 overflow-y-auto p-6 space-y-6">

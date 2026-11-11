@@ -32,8 +32,11 @@ import {
   conveyorApi,
   notificationsApi,
   settingsApi,
+  systemApi,
 } from '../services/api';
 import { evaluateBaggageLogic, createSortingRecord } from '../services/sortingEngine';
+
+export type ApiConnectionStatus = 'connected' | 'connecting' | 'disconnected';
 
 interface AppContextType {
   luggage: Baggage[];
@@ -45,8 +48,11 @@ interface AppContextType {
   activeConveyorLuggage: Baggage | null;
   logicSandbox: DigitalLogicState;
   isBackendConnected: boolean;
+  connectionStatus: ApiConnectionStatus;
+  apiBaseUrl: string;
   apiLoading: boolean;
   apiError: string | null;
+  retryBackendConnection: () => Promise<void>;
 
   // Baggage actions
   registerLuggage: (data: {
@@ -117,8 +123,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [settings, setSettings] = useState<SystemSettings>(INITIAL_SETTINGS);
 
   const [isBackendConnected, setIsBackendConnected] = useState<boolean>(false);
+  const [connectionStatus, setConnectionStatus] = useState<ApiConnectionStatus>('connecting');
   const [apiLoading, setApiLoading] = useState<boolean>(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const apiBaseUrl = systemApi.getBaseUrl();
 
   const [logicSandbox, setLogicSandboxState] = useState<DigitalLogicState>({
     I: true,
@@ -148,51 +156,73 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   useEffect(() => { flightsRef.current = flights; }, [flights]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
 
-  // ─── Backend Synchronization on Mount ──────────────────────────────────────
+  // ─── Backend Synchronization on Mount & Retry ──────────────────────────────
   const refreshFromBackend = useCallback(async () => {
     setApiLoading(true);
+    setConnectionStatus('connecting');
     setApiError(null);
     try {
+      // 1. First probe backend health endpoint
+      const health = await systemApi.healthCheck();
+      if (!health || health.status !== 'ok') {
+        throw new Error('Health check responded with non-ok status');
+      }
+
+      // 2. Fetch live data from SQLite tables
       const [backendBaggage, backendFlights, backendHistory, backendNotifs, backendSettings] =
         await Promise.all([
-          baggageApi.getAll().catch(() => null),
-          flightsApi.getAll().catch(() => null),
+          baggageApi.getAll(),
+          flightsApi.getAll(),
           sortingApi.getHistory().catch(() => null),
           notificationsApi.getAll().catch(() => null),
           settingsApi.get().catch(() => null),
         ]);
 
-      if (backendBaggage && backendFlights && backendSettings) {
+      if (backendBaggage && backendFlights) {
         setLuggage(backendBaggage);
         setFlights(backendFlights);
         if (backendHistory) setSortingHistory(backendHistory);
         if (backendNotifs) setNotifications(backendNotifs);
-        setSettings(backendSettings);
+        if (backendSettings) setSettings(backendSettings);
+
         setIsBackendConnected(true);
+        setConnectionStatus('connected');
+        setApiError(null);
       } else {
-        setIsBackendConnected(false);
+        throw new Error('Incomplete data payload received from backend.');
       }
     } catch (err: any) {
-      console.warn('FastAPI backend offline or starting up, using local state.', err);
+      console.warn(`AeroSort AI Backend offline at ${apiBaseUrl}:`, err.message || err);
       setIsBackendConnected(false);
+      setConnectionStatus('disconnected');
+      setApiError(`Backend API is currently unreachable at ${apiBaseUrl}. Showing local demonstration records.`);
     } finally {
       setApiLoading(false);
     }
-  }, []);
+  }, [apiBaseUrl]);
+
+  const retryBackendConnection = useCallback(async () => {
+    await refreshFromBackend();
+  }, [refreshFromBackend]);
 
   useEffect(() => {
     refreshFromBackend();
-    const interval = setInterval(() => {
-      // Periodic background sync if connected
-      fetch('http://localhost:8000/api/health', { method: 'GET' })
-        .then((res) => {
-          if (res.ok && !isBackendConnected) {
+    const interval = setInterval(async () => {
+      // Periodic background health check every 10 seconds
+      try {
+        const health = await systemApi.healthCheck();
+        if (health && health.status === 'ok') {
+          if (!isBackendConnected) {
             refreshFromBackend();
           }
-        })
-        .catch(() => {
+        } else {
           setIsBackendConnected(false);
-        });
+          setConnectionStatus('disconnected');
+        }
+      } catch {
+        setIsBackendConnected(false);
+        setConnectionStatus('disconnected');
+      }
     }, 10000);
     return () => clearInterval(interval);
   }, [refreshFromBackend, isBackendConnected]);
@@ -718,8 +748,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         activeConveyorLuggage,
         logicSandbox,
         isBackendConnected,
+        connectionStatus,
+        apiBaseUrl,
         apiLoading,
         apiError,
+        retryBackendConnection,
         registerLuggage,
         updateLuggage,
         deleteLuggage,

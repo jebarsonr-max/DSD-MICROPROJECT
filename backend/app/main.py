@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -183,15 +184,23 @@ def seed_initial_demo_data(db: Session):
     db.commit()
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize SQLite tables
+def init_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         seed_initial_demo_data(db)
     finally:
         db.close()
+
+# Initialize DB on module load (ensures SQLite is seeded in serverless / Vercel cold starts)
+try:
+    init_db()
+except Exception as e:
+    print(f"Startup DB init warning: {e}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
     yield
 
 app = FastAPI(
@@ -201,14 +210,31 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS configuration to allow all frontend origins
+# CORS configuration to allow all frontend origins (Vercel, localhost, custom domains)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+# Middleware: ensure requests hitting /baggage etc. are redirected to /api/baggage if missing prefix
+@app.middleware("http")
+async def ensure_api_prefix_middleware(request, call_next):
+    path = request.scope.get("path", "")
+    # If path doesn't start with /api, /docs, /openapi.json, or root /, route it to /api prefix
+    if (
+        not path.startswith("/api")
+        and not path.startswith("/docs")
+        and not path.startswith("/openapi.json")
+        and not path.startswith("/health")
+        and path != "/"
+    ):
+        request.scope["path"] = f"/api{path}"
+    response = await call_next(request)
+    return response
 
 # Include All Routers
 app.include_router(baggage_router)
@@ -228,11 +254,18 @@ def root():
         "tagline": "Intelligent Baggage. Accurate Weighing. Automated Sorting.",
         "status": "OPERATIONAL",
         "version": "2.0.0",
-        "docs_url": "/docs"
+        "docs_url": "/docs",
+        "health_url": "/api/health"
     }
 
 @app.get("/api/health")
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "service": "AeroSort AI API", "database": "SQLite Connected"}
+    return {
+        "status": "ok",
+        "service": "AeroSort AI API",
+        "database": "SQLite Connected",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
+
 

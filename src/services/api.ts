@@ -12,40 +12,76 @@ import {
   ConveyorSimulationState,
 } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+/**
+ * Dynamically resolves the API base URL:
+ * 1. Checks VITE_API_URL environment variable (for external deployments e.g. Render/Railway)
+ * 2. In browser production (e.g. Vercel deployment), defaults to '/api' so requests are same-origin
+ *    and routed via Vercel serverless function (vercel.json) without mixed-content errors.
+ * 3. In local development, defaults to '/api' (proxied by Vite to http://127.0.0.1:8000)
+ */
+export function getApiBaseUrl(): string {
+  if (import.meta.env.VITE_API_URL) {
+    const custom = import.meta.env.VITE_API_URL.trim();
+    return custom.endsWith('/') ? custom.slice(0, -1) : custom;
+  }
+  if (typeof window !== 'undefined') {
+    // On Vercel or any deployed domain, use same-origin relative path
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return '/api';
+    }
+  }
+  return '/api';
+}
 
 async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const base = getApiBaseUrl();
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const url = `${base}${cleanEndpoint}`;
   const headers = {
     'Content-Type': 'application/json',
     ...(options?.headers || {}),
   };
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
 
-  if (!response.ok) {
-    let errorDetail = response.statusText;
-    try {
-      const errorJson = await response.json();
-      if (errorJson.detail) {
-        errorDetail = errorJson.detail;
+    if (!response.ok) {
+      let errorDetail = response.statusText;
+      try {
+        const errorJson = await response.json();
+        if (errorJson.detail) {
+          errorDetail = typeof errorJson.detail === 'string' ? errorJson.detail : JSON.stringify(errorJson.detail);
+        }
+      } catch {
+        // Use statusText fallback
       }
-    } catch {
-      // Use statusText fallback
+      throw new Error(errorDetail || `Request failed with status ${response.status}`);
     }
-    throw new Error(errorDetail || `Request failed with status ${response.status}`);
-  }
 
-  // Handle empty responses
-  const contentType = response.headers.get('content-type');
-  if (contentType && contentType.includes('application/json')) {
-    return response.json();
+    // Handle empty responses
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return response.json();
+    }
+    return response.text() as unknown as T;
+  } catch (err: any) {
+    if (err.name === 'TypeError' && String(err.message).toLowerCase().includes('fetch')) {
+      throw new Error(`API server unreachable at ${url}. Please ensure the backend is running.`);
+    }
+    throw err;
   }
-  return response.text() as unknown as T;
 }
+
+// ── 0. System Health APIs ──
+export const systemApi = {
+  healthCheck: async (): Promise<{ status: string; service?: string; database?: string }> => {
+    return request<{ status: string; service?: string; database?: string }>('/health');
+  },
+  getBaseUrl: (): string => getApiBaseUrl(),
+};
 
 // ── 1. Baggage APIs ──
 export const baggageApi = {
@@ -495,7 +531,7 @@ export const reportsApi = {
     }>('/reports/statistics');
   },
 
-  getExportCsvUrl: () => `${API_BASE}/reports/export-csv`,
+  getExportCsvUrl: () => `${getApiBaseUrl()}/reports/export-csv`,
 };
 
 // ── 8. Notifications APIs ──
